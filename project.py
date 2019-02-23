@@ -51,9 +51,6 @@ project = mlProject('Customer Segements', 'clustering model should factor in bot
 
 
 """
-
-
-
 class mlProject (object):
     
     def __init__ (self, name, description=None):
@@ -131,21 +128,27 @@ class mlProject (object):
 
 
     """
+    Purpose: To set the training prerfferences for a project. This sets the type of training, regression, classification, clustering and
+             the models used. There are also ways to set the hyperparamaters
+        
+    Call Variables:
     def setTrainingPreferences (self, crossValidationSplits=None, parallelJobs=None, modelType=None, modelList=None, 
                                 testSize=None, randomState=None, uniqueThreshold=None, dropDuplicates=None, 
                                 clusterDimensionThreshold=None, varianceThreshold=None, kmeansClusters=None,  useStandardScaler = None,
-                                fbeta=None, defaultHyperparameters=None, hyperparametersLongRun=None):
+                                fbeta=None, defaultHyperparameters=None, hyperparametersLongRun=None, gridSearchVerbose=0,
+                                gridSearchScoring=None):
+    Example:
+        project.setTrainingPreferences (crossValidationSplits=10, parallelJobs=-1, modelType=tm.TRAIN_CLASSIFICATION, 
+            modelList=['l1', 'l2', 'rfc', 'gbc', 'kneighbors', 'sgd', 'bagging', 'adaboost', 'gaussiannb'] ) 
  
-    project.setTrainingPreferences (crossValidationSplits=10, parallelJobs=-1, modelType=tm.TRAIN_CLASSIFICATION, 
-        modelList=['l1', 'l2', 'rfc', 'gbc', 'kneighbors', 'sgd', 'bagging', 'adaboost', 'gaussiannb'] ) 
  
- 
-    TRAIN_REGRESSION : ['l1', 'l2', 'lasso', 'ridge', 'enet', 'rf', 'gb', 'decisiontree', 'linearregression'],
-    TRAIN_CLASSIFICATION: ['l1', 'l2', 'rfc', 'gbc', 'decisiontree', 'kneighbors', 'sgd', 'bagging', 'adaboost', 'gaussiannb', 'linearregression'],
-    TRAIN_CLUSTERING: ['kmeans']}
+    Models to be used:
+        TRAIN_REGRESSION : ['l1', 'l2', 'lasso', 'ridge', 'enet', 'rf', 'gb', 'decisiontree', 'linearregression'],
+        TRAIN_CLASSIFICATION: ['l1', 'l2', 'rfc', 'gbc', 'decisiontree', 'kneighbors', 'sgd', 'bagging', 
+                                'adaboost', 'gaussiannb', 'linearregression'],
+        TRAIN_CLUSTERING: ['kmeans']}
      
-    """
-        
+    """    
     def setTrainingPreferences (self, crossValidationSplits=None, parallelJobs=None, modelType=None, modelList=None, 
                                 testSize=None, randomState=None, uniqueThreshold=None, dropDuplicates=None, 
                                 clusterDimensionThreshold=None, varianceThreshold=None, kmeansClusters=None,  useStandardScaler = None,
@@ -228,9 +231,10 @@ class mlProject (object):
             self.gridSearchScoring = gridSearchScoring
 
     """
-            
+    Purpose:        
     Set the hyperparameters to override the defaults for a model
-        Example:
+    
+    Example:
             hyperparameters = { 
                 'lasso__alpha' : [0.001, 0.01, 0.1, 1, 5, 10] 
                 }
@@ -273,11 +277,11 @@ class mlProject (object):
      
      
     """
-        Set the hyperpatamaters for the base_estimator 
+        Purpose: Set the hyperpatamaters for the base_estimator 
         
-        adaboost or bagging
+        For: adaboost or bagging
         
-        example:
+        Example:
         
         from sklearn.linear_model import LogisticRegression
         project.setBaseHyperparametersOverride('bagging', 
@@ -289,11 +293,33 @@ class mlProject (object):
         self.baseEstimator=model
   
     
+    """
 
+        Example: project.setConfusionMatrixLabels([(0,'Paid'), (1, 'Default') ])
+
+        
+    """
     def setConfusionMatrixLabels(self,list):
         self.confusionMatrixLabels = list
         return
     
+    
+ 
+    """
+    Purpose: Set the target variable for supervised learning. 
+            
+    Call: setTarget(self, value, boolean=False, trueValue=None, convertTable=None, tableName=None):
+            
+    Example:
+            project.setTarget('loan_status') 
+    
+        
+        trueValue = what is the true values
+        boolean = is this a boolean value
+        convertTable = a table of how to convert values
+            
+    """
+     
     def setTarget(self, value, boolean=False, trueValue=None, convertTable=None, tableName=None):
         if tableName is not None:
             if tableName in self.preppedTablesDF:
@@ -327,16 +353,34 @@ class mlProject (object):
         elif self.defaultPreppedTableName is None:
             self.defaultPreppedTableName = name
 
-    def exportFile(self, name, filename):
+    """
+    Purpose: Export the named file. (Projects can have multiuple files associated with them)
+            
+    Call: def exportFile(self, name, filename):
+            
+    Example: project.exportFile('Loan Data', 'fileout.csv'):
+            
+    """
+     def exportFile(self, name, filename):
         if name in self.preppedTablesDF:
             self.preppedTablesDF[name].to_csv(filename, index=False)
         return
 
 
+
+    """
+    Purpose: Run the explore data function. This will review the data and make recommendations
+            
+    Call: exploreData(self):
+            
+    Example: project.exploreData()
+            
+    """
     def exploreData(self):
         for name in self.preppedTablesDF:
            self.explore[name] = exploreData(self.preppedTablesDF[name], self)
-            
+
+           
     """
            Before adding any cleaning rules you must init
            
@@ -355,7 +399,14 @@ class mlProject (object):
     # Just run the cleaning rules - do not explore
 
 
-
+    """
+    Purpose: Run the cleaning rules established for a project. 
+            
+    Call: cleanProject(self)
+            
+    Example: project.cleanProject()
+            
+    """
     def cleanProject(self):
         toClean = [x for x in self.preppedTablesDF]
         for name in toClean:
@@ -363,7 +414,16 @@ class mlProject (object):
         return 
 
 
-    def cleanAndExploreProject(self):
+
+    """
+    Purpose: Run clean and explore together
+            
+    Call: def cleanAndExploreProject(self)
+            
+    Example: project.cleanAndExploreProject()
+            
+    """
+     def cleanAndExploreProject(self):
         toClean = [x for x in self.preppedTablesDF]
         for name in toClean:
             cleanData(self.preppedTablesDF[name], self.cleaningRules[name])
@@ -373,7 +433,16 @@ class mlProject (object):
         return 
 
 
-    def prepProjectByName(self, tableName=None):
+
+    """
+    Purpose: Prepare the 'table' for training. This will one-hot encode, for example
+            
+    Call: prepProjectByName(self, tableName=None)
+            
+    Example: project.prepProjectByName('Loan Data')
+            
+    """
+     def prepProjectByName(self, tableName=None):
         if tableName is not None:
             theName = tableName
         else:
@@ -384,7 +453,15 @@ class mlProject (object):
         return
         
         
- 
+        
+    """
+    Purpose: Once a file has been cleaned and explorred
+            
+    Call:
+            
+    Example:
+            
+    """
     def writePreppedFileByName(self, filename, tableName=None):
         if tableName is not None:
             theName = tableName
@@ -396,7 +473,14 @@ class mlProject (object):
         return
         
         
-        
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
     def writeTrainingSetFileByName(self, filename, tableName=None):
         if tableName is not None:
             theName = tableName
@@ -409,8 +493,15 @@ class mlProject (object):
         return
 
 
-    
-    def trainProjectByName(self, tableName=None):
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+     def trainProjectByName(self, tableName=None):
         if tableName is not None:
             theName = tableName
         else:
@@ -420,15 +511,29 @@ class mlProject (object):
             self.trainedModels[theName].fitModels()
         return
 
-
-    def prepProjectByBatch(self):
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+     def prepProjectByBatch(self):
         for tableName in self.batchTablesList:
             if tableName in self.preppedTablesDF:    
                 self.preppedData[tableName] = prepData(tableName, self)
         return
  
-    
-    def trainProjectByBatch(self):
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+     def trainProjectByBatch(self):
         for tableName in self.batchTablesList:
             if tableName in self.preppedTablesDF:    
                 self.trainedModels[tableName] = tm.trainModels( tableName, self)
@@ -436,7 +541,14 @@ class mlProject (object):
         return
   
     
-
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
     def exportBestModel(self, filename, tableName=None):
         if tableName is not None:
             theName = tableName
@@ -445,7 +557,15 @@ class mlProject (object):
         predict = predictProject(self, theName, self.bestModelName)
         predict.exportPredictClass(filename)
 
-
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+ 
     def createPredictFromBestModel(self, tableName=None):
         if tableName is not None:
             theName = tableName
@@ -453,7 +573,14 @@ class mlProject (object):
             theName = self.defaultPreppedTableName
         return predictProject(self, theName, self.bestModelName)
         
-
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
     def createPredictFromNamedModel(self, namedModel, tableName=None):
         if tableName is not None:
             theName = tableName
@@ -463,7 +590,14 @@ class mlProject (object):
         return predictProject(self, theName, namedModel)
 
 
-
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
     def exportNamedModel(self, namedModel, filename, tableName=None):
         if tableName is not None:
             theName = tableName
@@ -473,13 +607,27 @@ class mlProject (object):
         predict = predictProject(self, theName, namedModel)
         predict.exportPredictClass(filename)
         
-        
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """  
     def addManualRuleForTableName(self, tableName, functionName, columnName, value ): 
         if tableName in self.preppedTablesDF:
             df = self.preppedTablesDF[tableName]
             self.cleaningRules[tableName].addManualRule(functionName, columnName, value, df)
     
-    
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
     def addManualRuleForDefault(self, functionName, columnName=None, value=None ):
         if self.defaultPreppedTableName in self.preppedTablesDF:
             df = self.preppedTablesDF[self.defaultPreppedTableName]
@@ -487,11 +635,15 @@ class mlProject (object):
 
 
     """
+    Purpose:
+            
+    Call:
+            
+    Example:
             project.setGoals({'AUROC':(0.70,'>'),'Precision':(0.386,'>'),'fbeta':(0.44,'>')})
-
     """
-
-    def setGoals(self,goals):
+ 
+    def setGoals(self, goals):
         self.goalsToReach = goals
         return
 
@@ -586,8 +738,15 @@ class mlProject (object):
             print ('   R2 Compare model to simple model. Ratio of errors of MSE/Simple Model.  Score close to 1=Good, 0=Bad')
             print ('   AUROC area under curve of true positives to false positives. Closer to 1 is better')
    
-   
-    
+
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """   
     def reportResultsOnTrainedModel(self, fileName, modelName):
         print ('\nReport on model: ', modelName)
         
@@ -667,6 +826,15 @@ class mlProject (object):
                 #                  title='Normalized confusion matrix')
 
 
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+ 
     def logTrainingResults(self, fileName, outputFileName, inputModelName=None):
        print ('\nLogging Results: ')
        
@@ -759,7 +927,15 @@ class mlProject (object):
        #    print (x)
    
  
-
+"""
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+"""
+ 
 class predictProject (object):
     
     def __init__ (self, project, tableName=None, namedModel=None):
@@ -803,41 +979,106 @@ class predictProject (object):
             utility.raiseError('project name,{}, not found'.format(name))
             
         
-        
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+         
     def importPredictFile(self, name, type=None, description=None, location=None, fileName=None, sheetName=None, hasHeaders = False, range=None):
         self.predictFile = getData(name, type=type, description=description, location = location, fileName=fileName,  sheetName=sheetName, range=range, hasHeaders = hasHeaders)
         self.predictDataDF = self.predictFile.openTable()
 
 
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
     def importPredictFileFromProject(self, project, tableName):
         if tableName in project.preppedTablesDF:
             self.predictDataDF = project.preppedTablesDF[tableName]
- 
+
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+  
     def importPredictFromDF(self, df):
         self.predictDataDF = df
   
+ """
+ Purpose:
+         
+ Call:
+         
+ Example:
+         
+ """
     
     def prepPredict(self):
         prep = prepPredictData(self)
         self.predictSet = prep.getPredictSet()
         self.readyToRun = True
         
-        
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+         
     def exportPredictClass(self, filename):
         with open(filename, 'wb') as f:
             pk.dump(self, f)
 
-
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+ 
     def addToPredictFile(self, columnName, columnData):
         self.predictDataDF[columnName] = columnData
 
-
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+ 
     def exportPredictFile(self, filename):
         if self.predictDataDF is not None:
             self.predictDataDF.to_csv(filename, index=False)
 
                    
+    """
+    Purpose:
             
+    Call:
+            
+    Example:
+            
+    """
+             
     def runPredict(self):
         try:
             if self.readyToRun:
@@ -854,12 +1095,29 @@ class predictProject (object):
         except NotFittedError as e:
             print (repr(e))
 
-
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+ 
 def loadPredictProject(filename):
         with open(filename, 'rb') as f:
             return pk.load(f)
             
 
+"""
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+"""
+ 
 #
 #https://scikit-learn.org/stable/auto_examples/model_selection/plot_confusion_matrix.html
 #
