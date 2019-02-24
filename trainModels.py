@@ -360,10 +360,10 @@ def rfcPreferences(project,override=None):
         hyperparameters = override
     elif project.defaultHyperparameters:
         hyperparameters = {}
-    elif project.hyperparametersLongRun: # Shorter run
+    elif project.hyperparametersLongRun: # long run
         hyperparameters = {'randomforestclassifier__n_estimators': [10, 50, 100, 200, 500],
                             'randomforestclassifier__max_features': ['auto', 'sqrt', 0.33]}
-    else: # Longer run
+    else: # short run
         hyperparameters = {'randomforestclassifier__n_estimators': [10, 100, 200],
                             'randomforestclassifier__max_features': ['auto', 'sqrt', 0.33]}
     
