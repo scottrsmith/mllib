@@ -76,7 +76,7 @@ TRAIN_CLUSTERING = 'clustering'
 
 availableModels = { TRAIN_REGRESSION : ['l1', 'l2', 'lasso', 'ridge', 'enet', 'rf', 'gb', 'decisiontree', 'linearregression'],
                     TRAIN_CLASSIFICATION: ['l1', 'l2', 'rfc', 'gbc', 'decisiontree', 'kneighbors', 'sgd', 'bagging', 'adaboost', 
-                                            'baggingbase', 'adaboostbase', 'gaussiannb', 'linearregression'],
+                                            'baggingbase', 'adaboostbase', 'gaussiannb'],
                     TRAIN_CLUSTERING: ['kmeans']}
 
 
