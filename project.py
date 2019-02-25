@@ -855,7 +855,7 @@ class mlProject (object):
                    }
        
        hyperparametersToReport = ['loss','max_depth','learning_rate','C','max_iter','solver','max_features',
-                                  'n_estimators','max_samples','algorithm','penalty','tol']
+                                  'n_estimators','max_samples','algorithm','penalty','tol','var_smoothing']
        scoresToReport = ['AUROC','fbeta', 'Recall', 'Precision','RunTime', 'F1', 'Accuracy', 'MAE', 'r2']
     
        header = 'Model'
