@@ -105,7 +105,7 @@ class getData (object):
             else:
                 return(None)
                 
-        
+         compression='gzip'
         if self.type == 'csv':
             path = self.validateFilePath()
             self.dataFrame = pd.read_csv(path, header=headerValue(self), low_memory=False)
@@ -117,6 +117,9 @@ class getData (object):
         elif self.type == 'xls':
             path = self.validateFilePath()
             self.dataFrame = pd.read_excel(path, header=headerValue(self), sheet_name=self.sheetName)
+        elif self.type == 'gz':
+            path = self.validateFilePath()
+            self.dataFrame = pd.read_csv(path, header=headerValue(self), low_memory=False, compression='gzip')
         else:
             return None
         
