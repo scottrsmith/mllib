@@ -384,14 +384,21 @@ class exploreData(object):
 
         
     def statsSummary (self, name):
-        if name in self.columns:
+        if name in self.columns:     
             stats = self.columns[name]
-            str = 'Stats for Column: {}  datatype={}\n'.format(name, stats['dataType'])
-            str += '   mean:   {:<12.4}   first:  {:<12}\n'.format(stats['mean'] , stats['first'])
-            str += '   median: {:<12}   last:   {:<12}\n'.format(stats['median'], stats['last'])
-            str += '   std:    {:<12.4}   top:    {:<12}\n'.format(stats['std'],  stats['top'])
-            str += '   min:    {:<12}   freq:   {:<12}\n'.format(stats['min'], stats['freq']   )
-            str += '   max:    {:<12}   uniqie: {:<12}\n\n'.format(stats['max'],stats['unique'] )
+            dStats = {}
+            for s in stats:
+                if stats[s] is None:
+                    dStats[s] = 'None'
+                else:
+                    dStats[s] = stats[s]
+             
+            str = 'Stats for Column: {}  datatype={}\n'.format(name, dStats['dataType'])
+            str += '   mean:   {:<12.4}   first:  {}\n'.format(dStats['mean'] ,dStats['first'])
+            str += '   median: {:<12}   last:   {}\n'.format(dStats['median'], dStats['last'])
+            str += '   std:    {:<12.4}   top:    {}\n'.format(dStats['std'], dStats['top'])
+            str += '   min:    {:<12}   freq:   {}\n'.format(dStats['min'], dStats['freq']   )
+            str += '   max:    {:<12}   uniqie: {:<12}\n\n'.format(dStats['max'],dStats['unique'] )
 #            str += '    1%:    {:<10}   2.5%:   {:<10}   5%:   {:<10}      25%:   {:<10}    50%:   {:<10}\n'.format(stats['1%'], stats['2.5%'], stats['5%'] , stats['25%'] ,stats['50%'])
 #            str += '   50%:    {:<10}   75%:    {:<10}  95%:   {:<10}    97.5%:   {:<10}    99%:   {:<10}\n'.format(stats['50%'], stats['75%'], stats['95%'] , stats['97.5%'] , stats['99%'])
             #print (name)
@@ -481,6 +488,7 @@ class exploreData(object):
 
         # Plot heatmap of correlations
         sns.heatmap(correlations, annot=True, mask=mask, cbar=True, cmap='Greens', fmt='.0f')
+        plt.show()
 
 
 
@@ -493,6 +501,7 @@ class exploreData(object):
 
         # Plot heatmap of correlations
         sns.heatmap(self.heatMap, annot=False, cbar=True, cmap='Reds', fmt='.0f')
+        plt.show()
 
 
     def reviewObjects (self, name, stats, data, project):

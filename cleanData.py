@@ -32,9 +32,12 @@ import mlLib.utility as utility
 
 import numpy as np
 import pandas as pd
+import math
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+from sklearn.exceptions import DataConversionWarning
+import warnings
 
 
 
@@ -148,7 +151,7 @@ class cleanFixCase(object):
 #
 ######
 class cleanZeroFill(object):
-    def __init__ (self, name, value):
+    def __init__ (self, name, value=None):
         self.name = name
         self.value = value
         self.ruleName = CLEANDATA_ZERO_FILL
@@ -315,6 +318,7 @@ class cleanSetCatgory(object):
         return
    
     def execute(self, df, cleaningRules=None):
+        #print ('\n\nThe Categories',self.name, self.value)
         df[self.name] = df[self.name].astype('category',categories=self.value)
         return None
 
@@ -755,6 +759,9 @@ def threshold(df, columnName, indexKeyName, project):
 
 def pca(df, columnName, indexKeyName, project):
     # Create data by aggregating at customer level
+    warnings.filterwarnings(action='ignore', category=DataConversionWarning)
+    
+    
     dummies = pd.get_dummies( df[columnName] )
 
     # Add CustomerID to toy_item_dummies
@@ -950,10 +957,11 @@ class cleaningRules(object):
                     tmp = df[columnName].unique()
                     columns = []
                     for x in tmp:
-                        if type(x)==str:
+                        if type(x)==str and not math.isnan(x):
                             columns.append(x)                
                 else:
                     return 
+                #print ('\n\nClean set category', columnName, columns)
                 cleanFunction = cleanSetCatgory(columnName, columns)
 
             # Data shaping functions

@@ -67,6 +67,10 @@ from sklearn.metrics import adjusted_rand_score
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.tree import DecisionTreeRegressor
 
+from sklearn.exceptions import DataConversionWarning
+import warnings
+
+
 #pd.options.mode.chained_assignment = None  # default='warn'
 
 TRAIN_CLASSIFICATION = 'classification'
@@ -74,7 +78,7 @@ TRAIN_REGRESSION = 'regression'
 TRAIN_CLUSTERING = 'clustering'
 
 
-availableModels = { TRAIN_REGRESSION : ['l1', 'l2', 'lasso', 'ridge', 'enet', 'rf', 'gb', 'decisiontree', 'linearregression'],
+availableModels = { TRAIN_REGRESSION : ['lasso', 'ridge', 'enet', 'rf', 'gb', 'dtr', 'linearregression'],
                     TRAIN_CLASSIFICATION: ['l1', 'l2', 'rfc', 'gbc', 'decisiontree', 'kneighbors', 'sgd', 'bagging', 'adaboost', 
                                             'baggingbase', 'adaboostbase', 'gaussiannb'],
                     TRAIN_CLUSTERING: ['kmeans']}
@@ -102,7 +106,7 @@ def getModelPreferences(name, project, base=None):
             return rfPreferences(project,override)
         elif name=='gb':
             return gbPreferences(project,override)
-        elif name=='decisiontree':
+        elif name=='dtr':
             return dtrPreferences(project,override)
         elif name=='linearregression':
             return linearRegressionPreferences(project, override)
@@ -303,13 +307,14 @@ def l1Preferences(project,override=None):
     elif project.hyperparametersLongRun: # lgon run
         hyperparameters = {
                 'logisticregression__solver' : ['liblinear', 'saga'],
-                'logisticregression__C' : [.0001,.001, .01, .1, 10, 50 ,100, 250, 500, 1000],
-                'logisticregression__max_iter': [25, 50, 100, 300, 500]
+                'logisticregression__C' : [.0001,.001, .01, .1, 10, 30, 50 ,100, 250, 500, 1000],
+                'logisticregression__max_iter': [15, 25, 50, 100, 300, 500]
                 }
     else: # short run
         hyperparameters = {
                 'logisticregression__solver' : ['liblinear'],
-                'logisticregression__C' : [.0001,.001, .01, .1, 10, 50, 100, 500]
+                'logisticregression__max_iter': [10, 15, 25], 
+                'logisticregression__C' : [.01, .1, 10, 50]
                 }
     
     if project.modelType==TRAIN_REGRESSION:
@@ -334,12 +339,13 @@ def l2Preferences(project,override=None):
         hyperparameters = {
                 'logisticregression__solver' : ['newton-cg', 'lbfgs', 'liblinear', 'sag', 'saga'],
                 'logisticregression__C' : [.0001,.001, .01, .1, 10, 50, 100, 250, 500, 1000],
-                'logisticregression__max_iter': [25, 50, 100, 300, 500]
+                'logisticregression__max_iter': [15, 25, 50, 100, 300, 500]
                 }
     else: # short run
         hyperparameters = {
-                'logisticregression__solver' : ['lbfgs', 'liblinear'],
-                'logisticregression__C' : [.0001,.001, .01, .1, 10, 50, 100, 500]
+                'logisticregression__solver' : ['lbfgs', 'liblinear','sag'],
+                'logisticregression__max_iter': [20, 25, 30], 
+                'logisticregression__C' : [.001, .01, .1, 1.0, 10.]
                 }
     
     if project.modelType==TRAIN_REGRESSION:
@@ -361,11 +367,13 @@ def rfcPreferences(project,override=None):
     elif project.defaultHyperparameters:
         hyperparameters = {}
     elif project.hyperparametersLongRun: # long run
-        hyperparameters = {'randomforestclassifier__n_estimators': [10, 50, 100, 200, 500],
-                            'randomforestclassifier__max_features': ['auto', 'sqrt', 0.33]}
+        hyperparameters = {
+                'randomforestclassifier__n_estimators': [10, 50, 100, 200],
+                'randomforestclassifier__max_features': ['auto', 'sqrt', 0.33, .11, 1.0]
+                           }
     else: # short run
-        hyperparameters = {'randomforestclassifier__n_estimators': [10, 100, 200],
-                            'randomforestclassifier__max_features': ['auto', 'sqrt', 0.33]}
+        hyperparameters = {'randomforestclassifier__n_estimators': [200, 250],
+                'randomforestclassifier__max_features': [1.0, .80, 0.33]}
     
     scorers = ['best','r2','MAE','accuracy','auroc','fbeta','score','confusionmatrix', 'f1', 'recall', 'precision']
     return RandomForestClassifier(random_state=project.randomState), hyperparameters, scorers
@@ -383,13 +391,33 @@ def gbcPreferences(project, override=None):
     elif project.defaultHyperparameters:
         hyperparameters = {}
     elif project.hyperparametersLongRun: # long run
-        hyperparameters = {'gradientboostingclassifier__n_estimators': [50, 100, 200, 500],
-            'gradientboostingclassifier__max_depth': [1, 10, 50, 100],
-            'gradientboostingclassifier__learning_rate':[.1, .01, .001, .0001]}
+        hyperparameters = {
+                'gradientboostingclassifier__min_samples_split': [2, 100, 500],
+                'gradientboostingclassifier__min_samples_leaf': [1, 50],
+                'gradientboostingclassifier__max_features': ['sqrt'],
+                'gradientboostingclassifier__subsample': [1., .8],
+                'gradientboostingclassifier__n_estimators': [175, 225],
+                'gradientboostingclassifier__max_depth': [6, 8, 10, 12],
+                'gradientboostingclassifier__loss': ['exponential','deviance'],
+                'gradientboostingclassifier__learning_rate':[.2, .1, .01, .05],
+                'gradientboostingclassifier__validation_fraction' :[0.1],
+                'gradientboostingclassifier__n_iter_no_change' :[5,10],
+                'gradientboostingclassifier__tol':[.1, .01, 0.001]
+                }
     else: # short run
-        hyperparameters = {'gradientboostingclassifier__n_estimators': [50, 100],
-            'gradientboostingclassifier__max_depth': [1, 10, 50],
-            'gradientboostingclassifier__learning_rate':[.1, .01, .001]}
+        hyperparameters = {
+                'gradientboostingclassifier__n_estimators': [300, 500],
+                'gradientboostingclassifier__min_samples_split': [500],
+                'gradientboostingclassifier__loss': ['deviance'],
+                'gradientboostingclassifier__min_samples_leaf': [25],
+                'gradientboostingclassifier__max_features': ['sqrt'],
+                'gradientboostingclassifier__max_depth': [6, 8],
+                'gradientboostingclassifier__learning_rate':[1., .1, .01],
+                'gradientboostingclassifier__subsample': [.8],
+                'gradientboostingclassifier__validation_fraction' :[0.1],
+                'gradientboostingclassifier__n_iter_no_change' :[10],
+                'gradientboostingclassifier__tol':[0.001]
+        }
     
     scorers = ['best','r2','MAE','accuracy','auroc','fbeta','score','confusionmatrix', 'f1', 'recall', 'precision']
     return GradientBoostingClassifier(random_state=project.randomState), hyperparameters, scorers
@@ -402,9 +430,21 @@ def dtcPreferences(project, override=None):
     elif project.defaultHyperparameters:
         hyperparameters = {}
     elif project.hyperparametersLongRun: # Shorter run
-        hyperparameters = {'decisiontreeclassifier__max_depth':[1, 10, 100, 500]}
+        hyperparameters = {
+                'decisiontreeclassifier__criterion' :['gini', 'entropy'],
+                'decisiontreeclassifier__splitter' :['best', 'random'],
+                'decisiontreeclassifier__min_samples_split' :[2, 50, 100],
+                'decisiontreeclassifier__min_samples_leaf': [1, 50, 100],
+                'decisiontreeclassifier__max_features': ['sqrt','auto','log2',1., .2, .5],
+                'decisiontreeclassifier__max_depth':[None, 1, 10, 50, 100, 250]
+                }
     else: # Longer run
-        hyperparameters = {'decisiontreeclassifier__max_depth':[1, 10, 50]}
+        hyperparameters = {'decisiontreeclassifier__splitter': ['best'], 
+                                     'decisiontreeclassifier__min_samples_leaf': [100, 150], 
+                                     'decisiontreeclassifier__min_samples_split': [100, 150], 
+                                     'decisiontreeclassifier__criterion': ['entropy'], 
+                                     'decisiontreeclassifier__max_features': [1.0], 
+                                     'decisiontreeclassifier__max_depth': [10]}
     
     scorers = ['best','r2','MAE','accuracy','auroc','fbeta','score','confusionmatrix', 'f1', 'recall', 'precision']
     return DecisionTreeClassifier(random_state=project.randomState), hyperparameters, scorers
@@ -436,19 +476,19 @@ def sgdPreferences(project,override=None):
                             # regression loss: 'squared_loss', 'huber', 'epsilon_insensitive', or 'squared_epsilon_insensitive'
     elif project.hyperparametersLongRun: # long run
         hyperparameters = {
-                            'sgdclassifier__loss': ['hinge', 'squared_loss', 'perceptron'], # 
-                            'sgdclassifier__penalty': ['l2', 'elasticnet'], # 'none', 'l2', 'l1', or 'elasticnet'
-                            'sgdclassifier__max_iter': [10, 100, 1000],
-                            'sgdclassifier__tol': [1e-1 , 1e-2 , 1e-3 ]
-                        }
+                'sgdclassifier__loss': ['hinge', 'squared_loss', 'perceptron'], # 
+                'sgdclassifier__penalty': ['l2', 'elasticnet'], # 'none', 'l2', 'l1', or 'elasticnet'
+                'sgdclassifier__max_iter': [10, 100, 1000],
+                'sgdclassifier__tol': [1e-1 , 1e-2 , 1e-3 ] 
+                }
                         
     else: # short run
         hyperparameters = {
-                     'sgdclassifier__loss': ['hinge'], # 
-                     'sgdclassifier__penalty': ['l2'], # 'none', 'l2', 'l1', or 'elasticnet'
-                     'sgdclassifier__max_iter': [1000],
-                     'sgdclassifier__tol': [1e-3 ]
-                     }
+                'sgdclassifier__loss': ['hinge'], # 
+                'sgdclassifier__penalty': ['l2'], # 'none', 'l2', 'l1', or 'elasticnet'
+                'sgdclassifier__max_iter': [1000],
+                'sgdclassifier__tol': [1e-3 ]
+                }
     
     scorers = ['best','r2','MAE','accuracy','fbeta','score','confusionmatrix', 'f1', 'recall', 'precision']
     return SGDClassifier(random_state=project.randomState), hyperparameters, scorers
@@ -461,13 +501,16 @@ def baggingPreferences(project,override=None):
     elif project.defaultHyperparameters:
         hyperparameters = {}
     elif project.hyperparametersLongRun: # long run
-        hyperparameters = {'baggingclassifier__n_estimators':[5, 10, 100], 
-                           'baggingclassifier__max_samples':[.25, .5, 1.], 
-                           'baggingclassifier__max_features':[.10, .25, .50, 1.]}
+        hyperparameters = {
+                'baggingclassifier__n_estimators':[5, 10, 100], 
+                'baggingclassifier__max_samples':[.5, .75, .95, 1.], 
+                'baggingclassifier__max_features':[ .50, .75, .95, 1.]
+                }
     else: # short run
-        hyperparameters = {'baggingclassifier__n_estimators':[10], 
-                           'baggingclassifier__max_samples':[1.0], 
-                           'baggingclassifier__max_features':[1.0]}
+        hyperparameters = {
+               'baggingclassifier__max_features': [.75, 1.], 
+               'baggingclassifier__max_samples': [.75, 1.], 
+               'baggingclassifier__n_estimators': [50, 100]}
      
     scorers = ['best','r2','MAE','accuracy','auroc','fbeta','score','confusionmatrix', 'f1', 'recall', 'precision']
     return BaggingClassifier(random_state=project.randomState), hyperparameters, scorers
@@ -481,13 +524,15 @@ def adaboostPreferences(project,override=None):
     elif project.defaultHyperparameters:
         hyperparameters = {}
     elif project.hyperparametersLongRun: # long run
-        hyperparameters = {'adaboostclassifier__n_estimators':[10, 50, 100], 
-                           'adaboostclassifier__learning_rate':[.1, 0.5, 1.0, 5.], 
-                           'adaboostclassifier__algorithm':['SAMME', 'SAMME.R']}
+        hyperparameters = {
+                'adaboostclassifier__n_estimators':[10, 50, 100], 
+                'adaboostclassifier__learning_rate':[.1, 0.5, 1.0], 
+                'adaboostclassifier__algorithm':['SAMME', 'SAMME.R']
+                }
     else: # short run
-        hyperparameters = {'adaboostclassifier__n_estimators':[50], 
-                           'adaboostclassifier__learning_rate':[1.0], 
-                           'adaboostclassifier__algorithm':['SAMME.R']}
+        hyperparameters = {'adaboostclassifier__n_estimators':[10, 100], 
+                'adaboostclassifier__learning_rate':[.9, 1.0], 
+                'adaboostclassifier__algorithm':['SAMME.R']}
      
     scorers = ['best','r2','MAE','accuracy','auroc','fbeta','score','confusionmatrix', 'f1', 'recall', 'precision']
     return AdaBoostClassifier(random_state=project.randomState), hyperparameters, scorers
@@ -547,9 +592,9 @@ def gaussiannbPreferences(project,override=None):
     elif project.defaultHyperparameters:
         hyperparameters = {}
     elif project.hyperparametersLongRun: # long run
-        hyperparameters = {'gaussiannb__var_smoothing':[ 5., 1., .5, 1e-1, 1e-3, 1e-5, 1e-9]}
+        hyperparameters = {'gaussiannb__var_smoothing':[ 1., 1e-2, 1e-1, 1e-3, 1e-5, 1e-9]}
     else: # short run
-        hyperparameters = {'gaussiannb__var_smoothing':[ 1e-1, 1e-3, 1e-5, 1e-9]}
+        hyperparameters = {'gaussiannb__var_smoothing':[ 1.0, .01, .001]}
     
     scorers = ['best','r2','MAE','accuracy','auroc','fbeta','score','confusionmatrix', 'f1', 'recall', 'precision']
     return GaussianNB(), hyperparameters, scorers
@@ -582,6 +627,9 @@ class trainModels (object):
     
     def __init__ (self, tableName, project):
     
+        warnings.filterwarnings(action='ignore', category=DataConversionWarning)
+
+
         # Split X and y into train and test sets
         self.X_train, self.X_test, self.y_train, self.y_test = project.preppedData[tableName].getTrainingSet()
 
@@ -641,6 +689,9 @@ class trainModels (object):
         
     def fitModels(self):
 
+        warnings.filterwarnings(action='ignore', category=DataConversionWarning)
+
+
         # Create empty dictionary called fitted_models
         self.fittedModels = {}
         self.runTimes = {}
@@ -672,12 +723,13 @@ class trainModels (object):
             self.fittedModels[name] = model
             self.runTimes[name] = (time() - runTimeStart) / 60.
             
-            self.scoreModels(name, model)            
-
-            utility.runLog("\n\n{} has been fit. The 'best' score is {:.4f} with a runtime of {:.3f} Minutes".format(
-                    name, model.best_score_,self.runTimes[name]))
-            utility.runLog('   Best Paramaters= {}'.format(model.best_params_))
-            self.project.logTrainingResults(self.tableName, 'runLog.csv', name)
+            self.scoreModels(name, model)    
+                    
+            if self.modelType!=TRAIN_CLUSTERING:
+                utility.runLog("\n\n{} has been fit. The 'best' score is {:.4f} with a runtime of {:.3f} Minutes".format(
+                        name, model.best_score_,self.runTimes[name]))
+                utility.runLog('   Best Paramaters= {}'.format(model.best_params_))
+                self.project.logTrainingResults(self.tableName, 'runLog.csv', name)
             
        
             # Print out the current accumulated scores
@@ -691,6 +743,8 @@ class trainModels (object):
         
     def scoreModels(self, name, model):
             
+        warnings.filterwarnings(action='ignore', category=DataConversionWarning)
+        
         confusionMatrix = None
         fpr, tpr, thresholds = None, None, None
         

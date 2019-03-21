@@ -77,31 +77,37 @@ class prepData(object):
             
             
             X = pd.get_dummies(df, columns=col)
+
+            #X.to_csv('ReadyToTrain.csv', index=False)
         
             # Create separate object for input features
             y = df[project.targetVariable[name]]
 
-
-        
+       
             # Create separate object for target variable
             X.drop(project.targetVariable[name], axis = 1, inplace=True)
             
             # Convert to float
             if project.useStandardScaler:
                 for col in X:
-                    if X[col].dtype != 'float64':
-                        utility.runLog( "Converting target Variable '{}' to float".format(col))
-                        X[col].astype('float64', inplace=True)
+#                    if X[col].dtype != 'float64':
+                    utility.runLog( "Converting target Variable '{}' to float".format(col))
+                    X[col].astype('float64', inplace=True)
                 
                 
         
         # Split X and y into train and test sets
         #print ("project.testSize, random_state=project.randomState = ", project.testSize, project.randomState)
         if project.modelType==tm.TRAIN_CLASSIFICATION:
-            self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=project.testSize, 
+
+             self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=project.testSize, 
                                                                     random_state=project.randomState, stratify=y)
         elif project.modelType == tm.TRAIN_CLUSTERING:
-            self.X_train = df
+            #Create new dataframe with dummy features
+            col = [x for x in df.dtypes[(df.dtypes=='object')].index] + [x for x in df.dtypes[(df.dtypes=='category')].index]
+            X = pd.get_dummies(df, columns=col)
+
+            self.X_train = X
             self.X_test, self.y_train, self.y_test = None, None, None
         else:
             self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=project.testSize, random_state=project.randomState)

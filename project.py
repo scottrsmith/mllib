@@ -35,6 +35,8 @@ from .prepData import prepData, prepPredictData
 import mlLib.trainModels as tm
 import mlLib.utility as utility
 
+from sklearn.exceptions import DataConversionWarning
+import warnings
 
 
 import pickle as pk
@@ -361,7 +363,7 @@ class mlProject (object):
     Example: project.exportFile('Loan Data', 'fileout.csv'):
             
     """
-     def exportFile(self, name, filename):
+    def exportFile(self, name, filename):
         if name in self.preppedTablesDF:
             self.preppedTablesDF[name].to_csv(filename, index=False)
         return
@@ -423,7 +425,7 @@ class mlProject (object):
     Example: project.cleanAndExploreProject()
             
     """
-     def cleanAndExploreProject(self):
+    def cleanAndExploreProject(self):
         toClean = [x for x in self.preppedTablesDF]
         for name in toClean:
             cleanData(self.preppedTablesDF[name], self.cleaningRules[name])
@@ -442,7 +444,7 @@ class mlProject (object):
     Example: project.prepProjectByName('Loan Data')
             
     """
-     def prepProjectByName(self, tableName=None):
+    def prepProjectByName(self, tableName=None):
         if tableName is not None:
             theName = tableName
         else:
@@ -501,7 +503,7 @@ class mlProject (object):
     Example:
             
     """
-     def trainProjectByName(self, tableName=None):
+    def trainProjectByName(self, tableName=None):
         if tableName is not None:
             theName = tableName
         else:
@@ -519,7 +521,7 @@ class mlProject (object):
     Example:
             
     """
-     def prepProjectByBatch(self):
+    def prepProjectByBatch(self):
         for tableName in self.batchTablesList:
             if tableName in self.preppedTablesDF:    
                 self.preppedData[tableName] = prepData(tableName, self)
@@ -533,7 +535,7 @@ class mlProject (object):
     Example:
             
     """
-     def trainProjectByBatch(self):
+    def trainProjectByBatch(self):
         for tableName in self.batchTablesList:
             if tableName in self.preppedTablesDF:    
                 self.trainedModels[tableName] = tm.trainModels( tableName, self)
@@ -769,8 +771,10 @@ class mlProject (object):
         
         print ('\nModel details:\n')
         print (model)
-        print ('\nModel Best Params:\n')
-        print (model.best_params_)
+        
+        if hasattr(model,'best_params_'):
+            print ('\nModel Best Params:\n')
+            print (model.best_params_)
         print ()
         
         if fpr is not None:
@@ -840,6 +844,7 @@ class mlProject (object):
        
        results = []
        
+       
        modelNames = {'gbc':'gradientboostingclassifier__',
                      'l1':'logisticregression__',
                      'l2':'logisticregression__',
@@ -851,11 +856,22 @@ class mlProject (object):
                      'adaboostbase':'adaboostclassifier__',
                      'decisiontree':'decisiontreeclassifier__',
                      'kneighbors': 'kneighborsclassifier__',
-                     'sgd':'sgdclassifier__'
+                     'sgd':'sgdclassifier__',
+                     'lasso':'lasso__',
+                     'ridge':'ridge__',
+                     'enet' : 'elasticnet__',
+                     'rf' : 'randomforestregressor__',
+                     'gb': 'gradientboostingregressor__',
+                     'dtr': 'decisiontreeregressor__',
+                     'kmeans' : 'kmeansclusters'
                    }
        
-       hyperparametersToReport = ['loss','max_depth','learning_rate','C','max_iter','solver','max_features',
-                                  'n_estimators','max_samples','algorithm','penalty','tol','var_smoothing']
+       hyperparametersToReport = ['loss','max_depth','learning_rate','C','max_iter',
+                                   'solver','max_features','n_estimators','max_samples',
+                                   'algorithm','penalty','tol', 'var_smoothing',
+                                   'min_samples_split','min_samples_leaf','subsample',
+                                   'validation_fraction','n_iter_no_change',
+                                   'criterion','splitter','alpha']
        scoresToReport = ['AUROC','fbeta', 'Recall', 'Precision','RunTime', 'F1', 'Accuracy', 'MAE', 'r2']
     
        header = 'Model'
@@ -948,6 +964,7 @@ class predictProject (object):
         self.predictSet = None
         self.readyToRun = False
 
+        warnings.filterwarnings(action='ignore', category=DataConversionWarning)
         
         if tableName is not None:
             if tableName in project.preppedTablesDF:    
@@ -1013,19 +1030,18 @@ class predictProject (object):
     Example:
             
     """
-  
     def importPredictFromDF(self, df):
         self.predictDataDF = df
-  
- """
- Purpose:
+
+
+    """
+        Purpose:
          
- Call:
+        Call:
          
- Example:
+        Example:
          
- """
-    
+    """ 
     def prepPredict(self):
         prep = prepPredictData(self)
         self.predictSet = prep.getPredictSet()
@@ -1056,6 +1072,22 @@ class predictProject (object):
     def addToPredictFile(self, columnName, columnData):
         self.predictDataDF[columnName] = columnData
 
+
+    def removeFromPredictFile(self, columns):
+        if type(columns) is not list:
+            if columns in self.predictDataDF:
+                self.predictDataDF.drop(columns, axis=1, inplace=True)
+            else:
+                utility.runLog( 'Error: Columns {} not found to drop'.format(name))
+        else:
+            for name in columns:
+                if name in self.predictDataDF:
+                    self.predictDataDF.drop(name, axis=1, inplace=True)
+                else:
+                    utility.runLog( 'Error: Columns {} not found to drop'.format(name))
+        return None
+
+
     """
     Purpose:
             
@@ -1080,6 +1112,8 @@ class predictProject (object):
     """
              
     def runPredict(self):
+        warnings.filterwarnings(action='ignore', category=DataConversionWarning)
+
         try:
             if self.readyToRun:
                 if self.modelType == tm.TRAIN_CLASSIFICATION:

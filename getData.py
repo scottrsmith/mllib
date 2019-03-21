@@ -105,7 +105,7 @@ class getData (object):
             else:
                 return(None)
                 
-         compression='gzip'
+        compression='gzip'
         if self.type == 'csv':
             path = self.validateFilePath()
             self.dataFrame = pd.read_csv(path, header=headerValue(self), low_memory=False)
