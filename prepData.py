@@ -26,7 +26,7 @@ from sklearn.model_selection import train_test_split
 
 from .cleanData import cleanData, cleaningRules
 import mlLib.trainModels as tm
-import mlLib.utility as utility
+import mlLib.mlUtility as mlUtility
 
 
 pd.set_option('display.max_columns', 100)
@@ -39,14 +39,17 @@ pd.set_option('display.float_format', lambda x: '%.6f' % x)
 
 class prepData(object):
 
-    def __init__ (self, name, project):
+    def __init__ (self, name, project, outFile=None):
 
         if name not in project.preppedTablesDF:
-            utility.raiseError('table not found')
+            mlUtility.raiseError('table not found')
             return None
 
         df = project.preppedTablesDF[name]
         self.tableName = name
+        self.X = None
+        self.y = None
+        self.project = project
 
 
         # only to datapred for modelTypes with target variables
@@ -64,7 +67,7 @@ class prepData(object):
                         df[project.targetVariable[name]].replace(fromValue, toValue, inplace=True)
                     df[project.targetVariable[name]] = df[project.targetVariable[name]].astype(int)
                     targetValue = 'Integer'
-                utility.runLog( 'Converting target Variable {} for {}'.format(project.targetVariable[name],targetValue))
+                mlUtility.runLog( 'Converting target Variable {} for {}'.format(project.targetVariable[name],targetValue))
  
    
         
@@ -76,46 +79,89 @@ class prepData(object):
                 col = [x for x in col if x != project.targetVariable[name]]
             
             
-            X = pd.get_dummies(df, columns=col)
+            self.X = pd.get_dummies(df, columns=col)
+            
+            # File is engineered, now do stuf before training
+            
+            self.removeTestingFileInX(project,project.targetVariable[name])
+            
+            if outFile is not None:
+                self.X.to_csv(outFile, index=False)
+                mlUtility.runLog( 'Writing prepped training File {}'.format(outFile))
+            
 
-            #X.to_csv('ReadyToTrain.csv', index=False)
         
             # Create separate object for input features
-            y = df[project.targetVariable[name]]
+            self.y = self.X[project.targetVariable[name]]
 
        
             # Create separate object for target variable
-            X.drop(project.targetVariable[name], axis = 1, inplace=True)
-            
-            # Convert to float
-            if project.useStandardScaler:
-                for col in X:
-#                    if X[col].dtype != 'float64':
-                    utility.runLog( "Converting target Variable '{}' to float".format(col))
-                    X[col].astype('float64', inplace=True)
-                
+            self.X.drop(project.targetVariable[name], axis = 1, inplace=True)
+            project.dataColumns = self.X.columns
+                                      
                 
         
         # Split X and y into train and test sets
-        #print ("project.testSize, random_state=project.randomState = ", project.testSize, project.randomState)
+        #mlUtility. traceLog(("project.testSize, random_state=project.randomState = ", project.testSize, project.randomState)
         if project.modelType==tm.TRAIN_CLASSIFICATION:
-
-             self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=project.testSize, 
-                                                                    random_state=project.randomState, stratify=y)
+            if project.testSize==0:
+                self.X_train = self.X
+                self.y_train = self.y
+                self.X_test = None
+                self.y_test = None
+            else:
+                 self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y,
+                              test_size=project.testSize, random_state=project.randomState, stratify=self.y)
         elif project.modelType == tm.TRAIN_CLUSTERING:
             #Create new dataframe with dummy features
             col = [x for x in df.dtypes[(df.dtypes=='object')].index] + [x for x in df.dtypes[(df.dtypes=='category')].index]
-            X = pd.get_dummies(df, columns=col)
+            self.X = pd.get_dummies(df, columns=col)
+            
+            self.removeTestingFileInX(project, None)
 
-            self.X_train = X
+            self.X_train = self.X
             self.X_test, self.y_train, self.y_test = None, None, None
         else:
-            self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=project.testSize, random_state=project.randomState)
+            self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y, test_size=project.testSize,
+                         random_state=project.randomState)
+
+        # Do scalars
         return 
+            
     
     def getTrainingSet (self):
         return self.X_train, self.X_test, self.y_train, self.y_test
      
+     
+#        self.mergedTrainingAndTest = False
+#        self.mergedTrainingAndTestFileName = None
+#            if self.mergedTrainingAndTestFileName in self.preppedTablesDF:
+#                return (self.preppedTablesDF[self.mergedTrainingAndTestFileName])
+# self.IsTrainingSet, 
+#    def execute(self, df, project,cleaningRules=None):
+#        if project.mergedTrainingAndTest:
+#            mask = (df[self.name] <= self.value) & df[project.IsTrainingSet]
+##        else:
+#            mask = (df[self.name] <= self.value)
+#            
+#        df.drop(df[mask].index, inplace=True)
+#        return None
+
+
+
+    def removeTestingFileInX(self, project, targetVariable):
+        if project.mergedTrainingAndTest:
+            if project.mergedTrainingAndTestFileName in project.preppedTablesDF:
+                testingMask =  self.X[project.IsTrainingSet]==False
+                self.X.drop(project.IsTrainingSet, axis=1, inplace=True)
+                
+                project.preppedTablesDF[project.mergedTrainingAndTestFileName] = self.X.loc[self.X[testingMask].index]
+                
+                if targetVariable is not None:
+                    project.preppedTablesDF[project.mergedTrainingAndTestFileName].drop(targetVariable, axis=1, inplace=True)
+                
+                self.X.drop(self.X[testingMask].index, inplace=True)
+
 
 
 class prepPredictData(object):
@@ -124,16 +170,18 @@ class prepPredictData(object):
         
         
         # run the cleaning rules:
-        cleanData(project.predictDataDF, project.cleaningRules)
+        cleanData(project.predictDataDF, project.cleaningRules, isPredict=True)
 
         #Create new dataframe with dummy features
         df = project.predictDataDF
         col = [x for x in df.dtypes[(df.dtypes=='object')].index] + [x for x in df.dtypes[(df.dtypes=='category')].index]
          
         self.predict = pd.get_dummies(df, columns=col)
+        
+        self.predict.fillna(0, inplace=True)
 
         #for xxx in self.predict.columns:
-        #    print ('Predict Columns', xxx)
+        #    mlUtility.runLog ('Predict Columns', xxx)
               
         return 
     

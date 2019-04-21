@@ -21,11 +21,15 @@
 from __future__ import print_function 
 from __future__ import division
 
+import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
+
 
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools
 from pathlib import Path
+import pandas as pd
 
 
 from .getData import getData
@@ -33,14 +37,134 @@ from .exploreData import exploreData
 from .cleanData import cleanData, cleaningRules
 from .prepData import prepData, prepPredictData
 import mlLib.trainModels as tm
-import mlLib.utility as utility
+import mlLib.mlUtility as mlUtility
 
-from sklearn.exceptions import DataConversionWarning
-import warnings
+from sklearn.exceptions import DataConversionWarning, ConvergenceWarning
+from sklearn.utils.testing import ignore_warnings
+from sklearn.preprocessing import StandardScaler
+
+
+import datetime
 
 
 import pickle as pk
 from sklearn.exceptions import NotFittedError
+
+
+
+def autoEvaluateClassifier(projectName=None,
+                           trainingFile=None,
+                           testingFile= None,
+                           targetVariable=None,
+                           key = None,
+                           predictSetOut = [None],
+                           trainingFileOut = None,
+                           logFileOut = None,
+                           predictFileOut = None,
+                           resultsFile=None,
+                           modelList = None,
+                           confusionMatrixLabels=[],
+                           scoring='f1',
+                           useProba = False,
+                           bottomImportancePrecentToCut = None,
+                           setProjectGoals={'F1': (0.9,'>')},
+                           runVerbose=0,
+                           doExplore=True,
+                           doTrain=True,
+                           doPredict=True,
+                           toTerminal=True
+                           ):
+     TRAININGFILENAME='Training'
+     TESTINGFILENAME ='Testing'              
+     
+     
+     mlUtility.openLogs(logFile=None, errorFile=None, toTerminal=toTerminal)
+
+    
+     project = mlProject(projectName, projectName)
+
+     project.setTrainingPreferences (crossValidationSplits=5, parallelJobs=-1, modelType=tm.TRAIN_CLASSIFICATION, 
+                     modelList=modelList, useStandardScaler=False, gridSearchScoring=scoring,
+                    testSize=.2, logTrainingResultsFilename=logFileOut, gridSearchVerbose=runVerbose,
+                    bottomImportancePrecentToCut=bottomImportancePrecentToCut,useProbaForPredict=useProba,
+                    runHyperparameters=tm.RUNDEFAULT, runEstimatorHyperparameters=tm.RUNDEFAULT,
+                    runAutoFeaturesMode=True,runMetaClassifier=tm.RUNDEFAULT)
+     project.importFile(TRAININGFILENAME, type='csv', description=TRAININGFILENAME, fileName=trainingFile,  hasHeaders = True)
+     project.importFile(TESTINGFILENAME, type='csv', description=TESTINGFILENAME, fileName=testingFile,  hasHeaders = True)
+
+     project.setTarget(targetVariable)
+     project.saveKey(TESTINGFILENAME, key)
+     project.MergeFilesAsTrainAndTest(TRAININGFILENAME,TESTINGFILENAME)
+
+     project.dropColumn(TRAININGFILENAME, key)
+
+     project.setGoals( setProjectGoals)
+     #project.setGoals( {'Accuracy': (0.9,'>'), 'F1': (0.85,'>'),'AUROC': (0.9,'>')})
+     project.setConfusionMatrixLabels(confusionMatrixLabels)
+
+     project.setOngoingReporting(False,TRAININGFILENAME)
+
+     project.exploreData(TRAININGFILENAME) 
+
+     if doExplore:
+         mlUtility.runLog (project.explore[TRAININGFILENAME])
+         mlUtility.runLog (project.explore[TRAININGFILENAME].allStatsSummary())
+         project.explore[TRAININGFILENAME].plotExploreHeatMap()
+         project.explore[TRAININGFILENAME].plotFeatureImportance()
+         project.explore[TRAININGFILENAME].plotColumnImportance()
+         #project.explore[TRAININGFILENAME].plotHistogramsAll(10)
+         project.explore[TRAININGFILENAME].plotCorrelations()
+
+
+
+     project.initCleaningRules(TRAININGFILENAME)
+     project.cleanProject(TRAININGFILENAME) 
+     project.prepProjectByName(TRAININGFILENAME,outFile= trainingFileOut)
+
+
+     if doTrain:
+         project.trainProjectByName(TRAININGFILENAME)
+
+         project.displayAllScores(TRAININGFILENAME)
+         mlUtility.runLog ('\n\nThe best is {}'.format( project.bestModelName))
+         mlUtility.runLog (project.bestModel)
+         mlUtility.runLog ('\n\n')
+         project.reportResultsOnTrainedModel(TRAININGFILENAME,project.bestModelName)
+
+     if doPredict:
+         predict = project.createPredictFromBestModel(TRAININGFILENAME)
+    
+         #predict.importPredictFile('Kaggle Data', type='csv', description='Raw Data', 
+         #                        fileName='./Data/titanic_test.csv',  hasHeaders = True)
+
+         predict.importPredictFromDF(project.PullTrainingData(),readyForPredict=True)
+         keyName, keyData = project.getKey()
+
+
+         predict.prepPredict()
+         predict.exportPreppedFile(predictFileOut,columnName=keyName, columnData=keyData)
+
+         ans = predict.runPredict()
+         #print (ans)
+    
+    
+     # Prepare the predict file for Kaggle upload
+         predict.addToPredictFile(keyName,keyData)
+         if useProba:
+             pass
+         else:
+             ans = [int(x) for x in ans]
+         predict.addToPredictFile(targetVariable,ans)
+         predict.keepFromPredictFile(predictSetOut)
+         predict.exportPredictFile(resultsFile)
+
+
+
+     mlUtility.closeLogs()
+    
+     
+    
+
 
 
 """
@@ -66,159 +190,232 @@ class mlProject (object):
         self.explore = {}
         self.cleaningRules = {}
         
+        # ********** PARAMATER DEFFAULTS
         # Training variables
+        self.crossValidationSplits = 10
+        self.parallelJobs = -1
+        self.modelType = None
+        self.modelList = None
         self.testSize = .2
         self.randomState = 1234
+        self.uniqueThreshold = 50
+        self.dropDuplicates = True
+
+
+        # Clustering 
+        # kmeans defaults
+
+        self.varianceThreshold = .8
+        self.clusterDimensionThreshold = 20
+        self.kmeansClusters = 3
+        self.useStandardScaler = True
+
+        self.fbeta = 1.0      
+        self.runHyperparameters = tm.RUNDEFAULT
+        self.runEstimatorHyperparameters = tm.RUNDEFAULT
+        self.runMetaClassifier = tm.RUNDEFAULT
+
+        self.smallSample = 25
+        self.highDimensionality = 100
         
-        # training prep data - preppedData class
-        self.preppedData = {}
-        
+        # Gridsearch Variables
+        self.gridSearchVerbose = 0
+        self.gridSearchScoring = None
+ 
+        self.featuresToReport = 10
+ 
+ 
+        self.logTrainingResultsFilename = 'mlLibRunLog.csv'
+ 
+ 
+        # THIS IS ALL INTERNAL STUFF
+    
         # Training variable for tables
         self.targetVariable = {}
         self.targetVariableIsBoolean = {}
         self.targetVariableTrueValue = {}
         self.targetVariableConvertValues = {}
- 
-    
-        # Managing object values
-        self.uniqueThreshold = 50
-        self.smallSample = 25
-        self.highDimensionality = 100
-        
-        # Clustering
-        self.varianceThreshold = .8
-        self.clusterDimensionThreshold = 20
-        
-        # kmeans defaults
-        self.kmeansClusters = 3
-        self.useStandardScaler = True
-        
-        
-        self.dropDuplicates = True
-
         self.trainedModels = {}
+        self.modelListAsRun = None
+        self.alias = {}
+        
+        # Prediction variables
+        self.useProbaForPredict = False
+        self.competitionMode = False
+
+        # training prep data - preppedData class
+        self.preppedData = {}       
+
+
+        self.overrideHyperparameters={}    
+        self.hyperparametersOverrideForBaseEstimator={}
+        self.hyperparametersOverrideForMetaClassifier={}
+        self.runAutoFeaturesMode = False
+        
+        # Set merged testing and taining set data
+        self.mergedTrainingAndTest = False
+        self.mergedTrainingAndTestFileName = None
+        self.IsTrainingSet='IsTrainingSet'
+        self.saveKeyData = None
+        self.saveKeyColName = None
+
         self.modelScores = None
         self.bestModelName = None
         self.bestModelScore = None
         self.bestModel = None
         
         
-        # model data
-        self.crossValidationSplits = 10
-        self.parallelJobs = -1
-        self.modelType = None
-        self.modelList = None
-        self.modelListAsRun = None
+        # Evaluation metrics
+        self.featureImportanceThreshold = 0.05
+        self.bottomImportancePrecentToCut = .20
+        self.correlationThreshold = 0.10
         
-        self.defaultHyperparameters = None
-        self.hyperparametersLongRun = None
-        self.overrideHyperparameters={}
-        self.baseEstimator=None
         
+     
         # Reporting
+        self.featureImportance = {}
+        self.correlations = {}
         self.confusionMatrixLabels = None
         self.ongoingReporting = False
         self.ongoingReportingFilename = None
-        
-        # Gridsearch Variables
-        self.gridSearchVerbose = 0
-        self.gridSearchScoring = None
-        
+        self.logDescription = None
+        self.dataColumns = None
+        s = str(datetime.datetime.now())
+        self.runStartTime = '{}'.format(s[:16])       
         # Goals
         self.goalsToReach = None
         return
 
 
     """
-    Purpose: To set the training prerfferences for a project. This sets the type of training, regression, classification, clustering and
-             the models used. There are also ways to set the hyperparamaters
-        
-    Call Variables:
-    def setTrainingPreferences (self, crossValidationSplits=None, parallelJobs=None, modelType=None, modelList=None, 
-                                testSize=None, randomState=None, uniqueThreshold=None, dropDuplicates=None, 
-                                clusterDimensionThreshold=None, varianceThreshold=None, kmeansClusters=None,  useStandardScaler = None,
-                                fbeta=None, defaultHyperparameters=None, hyperparametersLongRun=None, gridSearchVerbose=0,
-                                gridSearchScoring=None):
-    Example:
-        project.setTrainingPreferences (crossValidationSplits=10, parallelJobs=-1, modelType=tm.TRAIN_CLASSIFICATION, 
-            modelList=['l1', 'l2', 'rfc', 'gbc', 'kneighbors', 'sgd', 'bagging', 'adaboost', 'gaussiannb'] ) 
- 
- 
-    Models to be used:
-        TRAIN_REGRESSION : ['l1', 'l2', 'lasso', 'ridge', 'enet', 'rf', 'gb', 'decisiontree', 'linearregression'],
-        TRAIN_CLASSIFICATION: ['l1', 'l2', 'rfc', 'gbc', 'decisiontree', 'kneighbors', 'sgd', 'bagging', 
-                                'adaboost', 'gaussiannb', 'linearregression'],
-        TRAIN_CLUSTERING: ['kmeans']}
      
     """    
-    def setTrainingPreferences (self, crossValidationSplits=None, parallelJobs=None, modelType=None, modelList=None, 
-                                testSize=None, randomState=None, uniqueThreshold=None, dropDuplicates=None, 
-                                clusterDimensionThreshold=None, varianceThreshold=None, kmeansClusters=None,  useStandardScaler = None,
-                                fbeta=None, defaultHyperparameters=None, hyperparametersLongRun=None, gridSearchVerbose=0,
-                                gridSearchScoring=None):
+    def setTrainingPreferences (self, 
+                                crossValidationSplits=None, 
+                                parallelJobs=None, 
+                                modelType=None, 
+                                modelList=None, 
+                                testSize=None, 
+                                randomState=None, 
+                                uniqueThreshold=None, 
+                                dropDuplicates=None, 
+                                clusterDimensionThreshold=None, 
+                                varianceThreshold=None, 
+                                kmeansClusters=None,  
+                                useStandardScaler = None,
+                                fbeta=None, 
+                                runHyperparameters=None, 
+                                runEstimatorHyperparameters=None,
+                                runMetaClassifier=None,
+                                runAutoFeaturesMode=None,
+                                smallSample = None,
+                                highDimensionality = None,
+                                gridSearchVerbose=None,
+                                gridSearchScoring=None, 
+                                featuresToReport=None,
+                                logTrainingResultsFilename=None,
+                                useProbaForPredict=None,
+                                competitionMode = None,
+                                bottomImportancePrecentToCut = None
+                                ):
                                 
-        if crossValidationSplits is not None:
-            self.crossValidationSplits = crossValidationSplits
-        if parallelJobs is not None:
-            self.parallelJobs = parallelJobs
-            
+                  
             
         if modelType is not None:
             if modelType in tm.availableModels:
                 self.modelType = modelType
             else:
-                utility.raiseError(modelType + ' is not a valid model type')
-            
+                mlUtility.raiseError(modelType + ' is not a valid model type')
             
         if modelList is not None:
+            noAliasModelList = []
             for x in modelList:
-                if x not in tm.availableModels[self.modelType]:
-                    utility.raiseError('Model {} not found'.format(x))
-            self.modelList = modelList
+                # First check for Alias
+                mod = x.split('#')
+                # Split out the first part of the model i.e. the alias value
+                m = mod[0]
+                if len(mod)>1:  # add the alias
+                    self.alias[mod[1]] = m
+                if mlUtility.getFirst(m) not in tm.availableModels[self.modelType]:
+                    mlUtility.raiseError('Model {} not found'.format(m))
+                noAliasModelList.append(m)
+            self.modelList = noAliasModelList
         elif self.modelType is not None:
             self.modelList = tm.availableModels[self.modelType]
             
+        if parallelJobs is not None:
+            self.parallelJobs = parallelJobs
             
         if useStandardScaler is not None:
             self.useStandardScaler = useStandardScaler
-        
-        if fbeta is not None:
-            self.fbeta = fbeta
-        else:
-            self.fbeta = 1.0
             
-        if defaultHyperparameters is not None:
-            self.defaultHyperparameters = defaultHyperparameters
-        else:
-            self.defaultHyperparameters = False
+        if fbeta is not None:
+            self.fbeta = fbeta       
+            
+        if runHyperparameters is not None:
+            self.runHyperparameters = runHyperparameters
+            
+        if runEstimatorHyperparameters is not None:
+            self.runEstimatorHyperparameters = runEstimatorHyperparameters
 
-        # The complexity of hyperparameters, thus the length of how long the run.
-        # True = Longer run
-        if hyperparametersLongRun is not None:
-            self.hyperparametersLongRun = hyperparametersLongRun
-        else:
-            self.hyperparametersLongRun = False
-  
+        if runMetaClassifier is not None:
+            self.runMetaClassifier = runMetaClassifier
+             
+        if featuresToReport is not None:
+            self.featuresToReport = featuresToReport
             
         if testSize is not None:
             self.testSize = testSize
+            
         if randomState is not None:
-            self.randomState = randomState
+            self.randomState = randomState      
+            
         if uniqueThreshold is not None:
             self.uniqueThreshold = uniqueThreshold
-        if dropDuplicates is not None:
-            self.dropDuplicates = dropDuplicates
             
+        if dropDuplicates is not None:
+            self.dropDuplicates = dropDuplicates                      
             
         if clusterDimensionThreshold is not None:
-            self.clusterDimensionThreshold = clusterDimensionThreshold
+            self.clusterDimensionThreshold = clusterDimensionThreshold   
+            
         if varianceThreshold is not None:
             self.varianceThreshold = varianceThreshold
+
         if kmeansClusters is not None:
-            self.kmeansClusters = kmeansClusters
+            self.kmeansClusters = kmeansClusters     
             
-        self.gridSearchVerbose = gridSearchVerbose
+        if gridSearchVerbose is not None:
+            self.gridSearchVerbose = gridSearchVerbose
+            
+        if crossValidationSplits is not None:
+            self.crossValidationSplits = crossValidationSplits
+            
+        if smallSample is not None:
+            self.smallSample = smallSample
+            
+        if highDimensionality is not None:
+            self.highDimensionality = highDimensionality   
         
+        if logTrainingResultsFilename is not None:
+            self.logTrainingResultsFilename = logTrainingResultsFilename
+ 
+        if useProbaForPredict is not None:
+            self.useProbaForPredict = useProbaForPredict
+
+        if competitionMode is not None:
+            self.competitionMode = competitionMode
+
+        if runAutoFeaturesMode is not None:
+            self.runAutoFeaturesMode = runAutoFeaturesMode
+
+        if bottomImportancePrecentToCut is not None:
+            self.bottomImportancePrecentToCut = bottomImportancePrecentToCut
+            
+
+
+
+            
         # Set the scoring function 
         # https://scikit-learn.org/stable/modules/model_evaluation.html#scoring-parameter       
         
@@ -226,7 +423,7 @@ class mlProject (object):
             if self.modelType==tm.TRAIN_REGRESSION:
                 self.gridSearchScoring = 'r2'
             elif self.modelType==tm.TRAIN_CLASSIFICATION:
-                self.gridSearchScoring = 'f1'
+                self.gridSearchScoring = 'accuracy'
             else: #tm.TRAIN_CLUSTERING
                 self.gridSearchScoring = None
         else:
@@ -274,26 +471,16 @@ class mlProject (object):
             'gradientboostingclassifier__learning_rate':[.1, .01, .001, .0001]}
             
     """
-    def setHyperparametersOverride(self, modelName, override):
-        self.overrideHyperparameters[modelName] = override
+    def setHyperparametersOverride(self, modelName, override, forBaseEstimator=False, forMetaClassifier=False):
+        
+        if forMetaClassifier:
+            self.hyperparametersOverrideForMetaClassifier[modelName] = override            
+        elif forBaseEstimator:
+            self.hyperparametersOverrideForBaseEstimator[modelName] = override
+        else:
+            self.overrideHyperparameters[modelName] = override
      
      
-    """
-        Purpose: Set the hyperpatamaters for the base_estimator 
-        
-        For: adaboost or bagging
-        
-        Example:
-        
-        from sklearn.linear_model import LogisticRegression
-        project.setBaseHyperparametersOverride('bagging', 
-                 LogisticRegression(penalty='l1', C=np.linspace(1e-4, 1e3, num=20),
-                 random_state=project.randomState))
-            
-    """
-    def setBaseEstimator(self, model):
-        self.baseEstimator=model
-  
     
     """
 
@@ -306,6 +493,7 @@ class mlProject (object):
         return
     
     
+
  
     """
     Purpose: Set the target variable for supervised learning. 
@@ -369,6 +557,119 @@ class mlProject (object):
         return
 
 
+    """
+    Purpose: Get a columns from the data file
+            
+    Call: def getColumn(self, name, column):
+            
+    Example: project.getColumn('Loan Data','Name')
+            
+    """
+    def getColumn(self, name, columnName):
+        if name in self.preppedTablesDF:
+            df = self.preppedTablesDF[name]
+            if columnName in df:
+                return df[columnName]
+        return None
+
+
+    def dropColumn(self, name, columnName):
+        if name in self.preppedTablesDF:
+            df = self.preppedTablesDF[name]
+            if columnName in df:
+                df.drop(columnName, axis=1, inplace=True)
+        return None
+
+
+    # Used to save row keys, not used for training
+    def saveKey(self, filename, columnName):
+        if filename in self.preppedTablesDF:
+            if columnName in self.preppedTablesDF[filename]:
+                self.saveKeyData = self.preppedTablesDF[filename][columnName].tolist()
+                self.saveKeyColName = columnName
+            else:
+                mlUtility.errorLog( 'Key, {}, not found'.format(columnName))
+        return None
+
+    # Used to get row keys, not used for training
+    def getKey(self):
+        if self.saveKeyColName is not None:
+            return self.saveKeyColName, self.saveKeyData
+        else:
+            mlUtility.errorLog( 'No keys were saved. Sorry.')
+            return None
+       
+
+
+
+    def MergeFilesAsTrainAndTest(self, trainingFile, testingFile):
+        if trainingFile in self.preppedTablesDF and testingFile in self.preppedTablesDF:
+            # Mark files
+            self.preppedTablesDF[trainingFile][self.IsTrainingSet] = True
+            self.preppedTablesDF[testingFile][self.IsTrainingSet] = False
+            
+            self.preppedTablesDF[trainingFile] = pd.concat(objs=[self.preppedTablesDF[trainingFile],
+                     self.preppedTablesDF[testingFile]], 
+                     axis=0, sort=False).reset_index(drop=True)
+            
+            self.mergedTrainingAndTest = True
+            self.mergedTrainingAndTestFileName = testingFile
+            mlUtility.runLog( 'Training file, {}, and testing file, {}, merged'.format(trainingFile, testingFile))
+                
+        else:
+            mlUtility.errorLog( 'One or more filename ({}, {}) not found'.format(trainingFile, testingFile))
+        return None
+
+
+    def PullTrainingData(self):
+        if self.mergedTrainingAndTest:
+            if self.mergedTrainingAndTestFileName in self.preppedTablesDF:
+                return (self.preppedTablesDF[self.mergedTrainingAndTestFileName])
+            else:
+                mlUtility.errorLog( 'Training file, {}, not found'.format(self.mergedTrainingAndTestFileName))
+            
+        return None
+
+    
+######
+#
+# Description: 
+#
+# example:
+#       
+# params
+#           name = 
+#           value = 
+#
+#
+######
+    def groupByValue (self, filename, columnList, value='mean'):
+        
+        if filename in self.preppedTablesDF:
+            df = self.preppedTablesDF[filename]
+        else:
+            mlUtility.errorLog( 'Filename {} not found'.format(filename))
+            return None
+            
+            
+        if value not in ['mean']:
+            mlUtility.errorLog( 'Group function {} not found'.format(svalue))
+        if type(columnList) is not list:
+            if columnList  not in df:
+                mlUtility.errorLog( 'Columns {} not found for {}'.format, value)
+                return None
+            else:
+                columnsToRun = [columnList]
+        else:
+            for name in columnList:
+                if name not in df:
+                    mlUtility.errorLog( 'Columns {} not for {}'.format(name, value))
+            columnsToRun = columnList
+        
+        if value == 'mean':
+            return df.groupby(columnsToRun).mean()
+        return None
+    
 
     """
     Purpose: Run the explore data function. This will review the data and make recommendations
@@ -378,9 +679,12 @@ class mlProject (object):
     Example: project.exploreData()
             
     """
-    def exploreData(self):
-        for name in self.preppedTablesDF:
-           self.explore[name] = exploreData(self.preppedTablesDF[name], self)
+    def exploreData(self, fileName=None):
+        if fileName is None:
+            for name in self.preppedTablesDF:
+               self.explore[name] = exploreData(self.preppedTablesDF[name], self, name)
+        else:
+            self.explore[fileName] = exploreData(self.preppedTablesDF[fileName], self, fileName)
 
            
     """
@@ -389,13 +693,16 @@ class mlProject (object):
            project.initCleaningRules()
 
 
-           project.addManualRuleForDefault(ed.CLEANDATA_REBUCKET, 'term', [['36 months', ' 36 months'], '36'])
-           project.addManualRuleForDefault(ed.CLEANDATA_REBUCKET, 'term', [['60 months', ' 60 months'], '60'])
+           project.addManualRuleForDefault(ed.CLEANDATA_REBUCKET_TO_BINARY, 'term', [['36 months', ' 36 months'], '36'])
+           project.addManualRuleForDefault(ed.CLEANDATA_REBUCKET_TO_BINARY, 'term', [['60 months', ' 60 months'], '60'])
            
     """
-    def initCleaningRules(self):
-        for name in self.preppedTablesDF:
-            self.cleaningRules[name] = cleaningRules(self, self.explore[name])
+    def initCleaningRules(self, fileName=None):
+        if fileName is None:
+            for name in self.preppedTablesDF:
+                self.cleaningRules[name] = cleaningRules(self, self.explore[name])
+        else:
+            self.cleaningRules[fileName] = cleaningRules(self, self.explore[fileName])
 
 
     # Just run the cleaning rules - do not explore
@@ -409,10 +716,12 @@ class mlProject (object):
     Example: project.cleanProject()
             
     """
-    def cleanProject(self):
-        toClean = [x for x in self.preppedTablesDF]
-        for name in toClean:
-            cleanData(self.preppedTablesDF[name], self.cleaningRules[name])
+    def cleanProject(self, fileName=None):
+        if fileName is None:
+            for name in self.preppedTablesDF:
+                cleanData(self.preppedTablesDF[name], self.cleaningRules[name], isPredict=False)
+        else:
+            cleanData(self.preppedTablesDF[fileName], self.cleaningRules[fileName], isPredict=False)
         return 
 
 
@@ -425,13 +734,17 @@ class mlProject (object):
     Example: project.cleanAndExploreProject()
             
     """
-    def cleanAndExploreProject(self):
-        toClean = [x for x in self.preppedTablesDF]
-        for name in toClean:
-            cleanData(self.preppedTablesDF[name], self.cleaningRules[name])
+    def cleanAndExploreProject(self, fileName=None):
+        
+        if fileName is None:
+            for name in self.preppedTablesDF:
+                cleanData(self.preppedTablesDF[name], self.cleaningRules[name], isPredict=False)
              
-        for name in self.preppedTablesDF:
-           self.explore[name] = exploreData(self.preppedTablesDF[name], self)
+            for name in self.preppedTablesDF:
+               self.explore[name] = exploreData(self.preppedTablesDF[name], self, name)
+        else:
+            cleanData(self.preppedTablesDF[fileName], self.cleaningRules[fileName], isPredict=False)
+            self.explore[fileName] = exploreData(self.preppedTablesDF[fileName], self, fileName)
         return 
 
 
@@ -444,14 +757,14 @@ class mlProject (object):
     Example: project.prepProjectByName('Loan Data')
             
     """
-    def prepProjectByName(self, tableName=None):
+    def prepProjectByName(self, tableName=None, outFile=None):
         if tableName is not None:
             theName = tableName
         else:
             theName = self.defaultPreppedTableName
  
         if theName in self.preppedTablesDF:
-            self.preppedData[theName] = prepData(theName, self)
+            self.preppedData[theName] = prepData(theName, self, outFile)
         return
         
         
@@ -470,7 +783,7 @@ class mlProject (object):
         else:
             theName = self.defaultPreppedTableName
         if theName in self.preppedTablesDF:
-            utility.runLog('Exporting Prepped Data '+theName)
+            mlUtility.runLog('Exporting Prepped Data '+theName)
             self.preppedTablesDF[theName].to_csv(filename,index=False)
         return
         
@@ -490,7 +803,7 @@ class mlProject (object):
             theName = self.defaultPreppedTableName
         if theName in self.preppedData:
             X_train, X_test, y_train, y_test = self.preppedData[theName].getTrainingSet()
-            utility.runLog('Exporting Training Set '+theName+' to file '+filename)
+            mlUtility.runLog('Exporting Training Set '+theName+' to file '+filename)
             X_train.to_csv(filename,index=False)
         return
 
@@ -573,6 +886,7 @@ class mlProject (object):
             theName = tableName
         else:
             theName = self.defaultPreppedTableName
+        mlUtility.runLog ('Running Predict for Model {}'.format(self.bestModelName))
         return predictProject(self, theName, self.bestModelName)
         
     """
@@ -588,8 +902,8 @@ class mlProject (object):
             theName = tableName
         else:
             theName = self.defaultPreppedTableName
-        
-        return predictProject(self, theName, namedModel)
+        mlUtility.runLog ('Running Predict for Model {}'.format(tableName))
+        return predictProject(self, theName, tableName)
 
 
     """
@@ -617,10 +931,10 @@ class mlProject (object):
     Example:
             
     """  
-    def addManualRuleForTableName(self, tableName, functionName, columnName, value ): 
+    def addManualRuleForTableName(self, tableName, functionName, columnName, value, forPredict=True ): 
         if tableName in self.preppedTablesDF:
             df = self.preppedTablesDF[tableName]
-            self.cleaningRules[tableName].addManualRule(functionName, columnName, value, df)
+            self.cleaningRules[tableName].addManualRule(functionName, columnName, value, df, forPredict)
     
     """
     Purpose:
@@ -630,10 +944,10 @@ class mlProject (object):
     Example:
             
     """
-    def addManualRuleForDefault(self, functionName, columnName=None, value=None ):
+    def addManualRuleForDefault(self, functionName, columnName=None, value=None, forPredict=True ):
         if self.defaultPreppedTableName in self.preppedTablesDF:
             df = self.preppedTablesDF[self.defaultPreppedTableName]
-            self.cleaningRules[self.defaultPreppedTableName].addManualRule(functionName, columnName, value, df)
+            self.cleaningRules[self.defaultPreppedTableName].addManualRule(functionName, columnName, value, df, forPredict)
 
 
     """
@@ -669,7 +983,7 @@ class mlProject (object):
 
     """
     def displayAllScores(self, fileName, short=False):
-        print ('\nReport on file: {}'.format(fileName))
+        mlUtility.runLog ('\nReport on file: {}'.format(fileName))
         model = self.trainedModels[fileName]
         
         
@@ -705,13 +1019,17 @@ class mlProject (object):
                             elif operand=='=':
                                 if (row[goal]+.05 <= val) and (row[goal]-.05 >= val):
                                         listGoals += '{}:{:5.3f}={:5.3f} '.format(goal,model.row[goal], val)
-                        
-                row['Goals'] = listGoals
             
             
             lst.append(row)
+            if len(listGoals) > 0:
+                goalRow = {}
+                goalRow['Model'] = 'Goals:' + listGoals
+                lst.append(goalRow)
+                
+                
 
-        utility.printAsTable(lst,columns=cols)
+        mlUtility.printAsTable(lst,columns=cols, toTerminal=(not short))
         
         # Message the goals
         msg = '    ** Project Goals: '
@@ -719,26 +1037,25 @@ class mlProject (object):
             for goal in self.goalsToReach:
                 val,operand = self.goalsToReach[goal]
                 msg+='{} {} {:5.3f}, '.format(goal,operand, val)
-        print (msg)
+        mlUtility.runLog (msg, toTerminal=short)
         
         
         if not short:
-            print ('\n')
-            print ('   Confusion           Predicted')
-            print ('   Matrix:       Negative    Positive')
-            print ('              +-----------+-----------+')
-            print ('   Actual Neg | True Neg  | False Pos | ')
-            print ('   Actual Pos | False Neg | True Pos  |<--Recall = True Pos / (True Pos + False Neg)')
-            print ('              +-----------+-----------+          = How many true were actually true')
-            print ('                                ^ Precision = True Pos / (False Pos + True Pos) ')
-            print ('                                          = How many did we predict correcly\n')
-            print ()
-            print ('   Accuracy = how many out of the total did we predict correctly')
-            print ('   F1 Score  = 2 * (Precision * recall) / (Precision + recall)  (1.0 is perfect precision and recall)')
-            print ('   f-Beta = F1 score factored 1=best, 0=worst. β<1 favors precision, β>1 favors recall. β->0 only precision, β->inf only recall')
-            print ('   MSE (Mean squared error) - distance from the fit line (Smaller the value better the fit)')
-            print ('   R2 Compare model to simple model. Ratio of errors of MSE/Simple Model.  Score close to 1=Good, 0=Bad')
-            print ('   AUROC area under curve of true positives to false positives. Closer to 1 is better')
+            mlUtility.runLog ('\n')
+            mlUtility.runLog ('   Confusion           Predicted')
+            mlUtility.runLog ('   Matrix:       Negative    Positive')
+            mlUtility.runLog ('              +-----------+-----------+')
+            mlUtility.runLog ('   Actual Neg | True Neg  | False Pos | ')
+            mlUtility.runLog ('   Actual Pos | False Neg | True Pos  |<--Recall = True Pos / (True Pos + False Neg)')
+            mlUtility.runLog ('              +-----------+-----------+          = How many true were actually true')
+            mlUtility.runLog ('                                ^ Precision = True Pos / (False Pos + True Pos) ')
+            mlUtility.runLog ('                                          = How many did we predict correcly\n\n')
+            mlUtility.runLog ('   Accuracy = how many out of the total did we predict correctly')
+            mlUtility.runLog ('   F1 Score  = 2 * (Precision * recall) / (Precision + recall)  (1.0 is perfect precision and recall)')
+            mlUtility.runLog ('   f-Beta = F1 score factored 1=best, 0=worst. β<1 favors precision, β>1 favors recall. β->0 only precision, β->inf only recall')
+            mlUtility.runLog ('   MSE (Mean squared error) - distance from the fit line (Smaller the value better the fit)')
+            mlUtility.runLog ('   R2 Compare model to simple model. Ratio of errors of MSE/Simple Model.  Score close to 1=Good, 0=Bad')
+            mlUtility.runLog ('   AUROC area under curve of true positives to false positives. Closer to 1 is better')
    
 
     """
@@ -750,7 +1067,7 @@ class mlProject (object):
             
     """   
     def reportResultsOnTrainedModel(self, fileName, modelName):
-        print ('\nReport on model: ', modelName)
+        mlUtility.runLog ('\nReport on model: '+modelName)
         
         
         model = self.trainedModels[fileName].fittedModels[modelName]
@@ -765,17 +1082,18 @@ class mlProject (object):
         
         
         for s in self.trainedModels[fileName].shortModelScoresColumns:
-            print ('  {} = {}'.format(s,scores[s]))
-        print ('  Confusion Matrix = {}\n  DataShape = {}\n'.format(confusionMatrix, self.preppedTablesDF[fileName].shape))
+            mlUtility.runLog ('  {} = {}'.format(s,scores[s]))
+        mlUtility.runLog ('  Confusion Matrix = {}\n  DataShape = {}\n'.format(confusionMatrix, self.preppedTablesDF[fileName].shape))
         
         
-        print ('\nModel details:\n')
-        print (model)
+        mlUtility.runLog ('\nModel details:\n')
+        mlUtility.runLog (model)
         
         if hasattr(model,'best_params_'):
-            print ('\nModel Best Params:\n')
-            print (model.best_params_)
-        print ()
+            mlUtility.runLog ('\nModel Best Params:\n')
+            mlUtility.runLog (model.best_params_)
+        mlUtility.runLog ('\n\nHyperparamaters: ',self.trainedModels[fileName].hyperparameters[modelName])
+        
         
         if fpr is not None:
             
@@ -796,9 +1114,9 @@ class mlProject (object):
             index = np.argmax(function)
 
             optimalThreshold = threshold[np.argmax(function)]
-            print ('Optimal Threshold:', optimalThreshold)
-            print ()
-            print ()
+            mlUtility.runLog ('Optimal Threshold:', optimalThreshold)
+            mlUtility.runLog ()
+            mlUtility.runLog ()
             
             plt.title('Receiver Operating Characteristic')
             plt.plot(fpr, tpr, 'b', label = 'AUC = %0.2f' % scores['AUROC'])
@@ -809,6 +1127,9 @@ class mlProject (object):
             plt.ylabel('True Positive Rate')
             plt.xlabel('False Positive Rate')
             plt.show()
+        
+        self.showFeatureImportances(fileName, modelName)
+        
         
         if confusionMatrix is not None:
             # Plot non-normalized confusion matrix
@@ -829,6 +1150,32 @@ class mlProject (object):
                 #plot_confusion_matrix(confusionMatrix, classes=classes, normalize=True,
                 #                  title='Normalized confusion matrix')
 
+    def showFeatureImportances(self, fileName, modelName):
+        if fileName is not None:
+            theName = fileName
+        else:
+            theName = self.defaultPreppedTableName
+        if modelName in self.modelList:
+            scores = self.trainedModels[fileName].modelScores[modelName]
+            if scores['FI'] is not None:
+                print ('\nFeatures Importance for ',modelName)
+                (pd.Series(scores['FI'], index=self.dataColumns).nlargest(self.featuresToReport).plot(kind='barh',
+                                                     figsize=(8,6),title='Features for '+modelName))
+                plt.show()
+            elif scores['COEF'] is not None:
+                # The estimated coefficients will all be around 1:
+                print ('\nFeature Importance Using Estimated coefficients for ', modelName)
+                (pd.Series(scores['COEF'], index=self.dataColumns).nlargest(self.featuresToReport).plot(kind='barh',
+                                                 figsize=(8,6),title='Coefficients for '+modelName))
+                plt.show()
+            else:
+                mlUtility.runLog ('The model,{}, was not found'.format(modelName))
+                return
+        else:
+            mlUtility.runLog ('The model,{}, was not found'.format(modelName))
+            
+
+
 
     """
     Purpose:
@@ -838,9 +1185,15 @@ class mlProject (object):
     Example:
             
     """
+    def logTrainingResultsRunDescription(self, description='None'):
+       self.logDescription = description
+           
  
     def logTrainingResults(self, fileName, outputFileName, inputModelName=None):
-       print ('\nLogging Results: ')
+       #mlUtility. traceLog(('\nLogging Results: ')
+       
+       if len(outputFileName)==0:
+           return
        
        results = []
        
@@ -852,8 +1205,6 @@ class mlProject (object):
                      'bagging':'baggingclassifier__',
                      'adaboost':'adaboostclassifier__',
                      'gaussiannb':'gaussiannb__',
-                     'baggingbase':'baggingclassifier__',
-                     'adaboostbase':'adaboostclassifier__',
                      'decisiontree':'decisiontreeclassifier__',
                      'kneighbors': 'kneighborsclassifier__',
                      'sgd':'sgdclassifier__',
@@ -863,7 +1214,12 @@ class mlProject (object):
                      'rf' : 'randomforestregressor__',
                      'gb': 'gradientboostingregressor__',
                      'dtr': 'decisiontreeregressor__',
-                     'kmeans' : 'kmeansclusters'
+                     'kmeans' : 'kmeansclusters__',
+                     'xgbc' : 'xgbclassifier__',
+                     'stack':'stackingclassifier__',
+                     'etc':'extratreesclassifier__',
+                     'vote':'votingclassifier__',
+                     'svc':'svc__'
                    }
        
        hyperparametersToReport = ['loss','max_depth','learning_rate','C','max_iter',
@@ -871,17 +1227,18 @@ class mlProject (object):
                                    'algorithm','penalty','tol', 'var_smoothing',
                                    'min_samples_split','min_samples_leaf','subsample',
                                    'validation_fraction','n_iter_no_change',
-                                   'criterion','splitter','alpha']
+                                   'criterion','splitter','alpha', 
+                                   'n_neighbors','leaf_size','p','voting']
        scoresToReport = ['AUROC','fbeta', 'Recall', 'Precision','RunTime', 'F1', 'Accuracy', 'MAE', 'r2']
     
-       header = 'Model'
+       header = 'Model, Description'
        for report in scoresToReport:
            header += ', {}'.format(report)
        for param in hyperparametersToReport:
                header += ', {}'.format(param)
-       header += ', runParams'
-       #print ('\n')
-       #print (header)
+       header += ', runParams, BestParams, Date, Time'
+       #mlUtility. traceLog(('\n')
+       #mlUtility. traceLog((header)
        header+= '\n'
        
        # Check is the file exists and than open for write or append
@@ -905,7 +1262,7 @@ class mlProject (object):
            scores = self.trainedModels[fileName].modelScores[modelName]
            
                
-           row = '{}'.format(modelName)
+           row = '{},"{}"'.format(modelName, self.logDescription)
            for report in scoresToReport:
                if scores[report] is None:
                    row += ', None'
@@ -914,33 +1271,31 @@ class mlProject (object):
         
         
            for param in hyperparametersToReport:
-               lookup = modelNames[utility.removePlus(modelName)]+param
-               #print ('lookup=',lookup)
+               lookup = modelNames[mlUtility.getFirst(modelName)]+param
+               #mlUtility. traceLog(('lookup=',lookup)
                if lookup in model.best_params_ :
                    row += ', {}'.format(model.best_params_[lookup])
                else:
-                   row += ','
+                   if param in model.best_params_ :
+                       row += ', {}'.format(model.best_params_[param])
+                   else:
+                       row += ','
 
            hp = self.trainedModels[fileName].hyperparameters[modelName]
            hpStr = '{'
            for h in hp:
                hpStr+='{}: {},'.format(h,hp[h])
            hpStr += '}'
-           #hpFixed = ''
-           #for c in hpStr:
-           #    if c=='"':
-           #        hpFixed+=
-            #   else:
-            #       hpFixed+=c
-           row += ',"{}"'.format(hpStr)
-           print (row)
+           
+           row += ',"{}","{}",{}, {}'.format(hpStr, model.best_params_, self.runStartTime,datetime.datetime.now())
+           #mlUtility. traceLog((row)
            row += '\n'
            file.write(row)
            
        file.close()
-       #print ('\n')
+       #mlUtility. traceLog(('\n')
        #for x in model.best_params_ :
-       #    print (x)
+       #    mlUtility.runLog (x)
    
  
 """
@@ -963,8 +1318,9 @@ class predictProject (object):
         self.predictDataDF = None
         self.predictSet = None
         self.readyToRun = False
+        self.useProbaForPredict = project.useProbaForPredict
+        self.useStandardScaler = project.useStandardScaler
 
-        warnings.filterwarnings(action='ignore', category=DataConversionWarning)
         
         if tableName is not None:
             if tableName in project.preppedTablesDF:    
@@ -993,7 +1349,7 @@ class predictProject (object):
             else:
                 self.model = theTrainedModel.fittedModels[name].best_estimator_
         else:
-            utility.raiseError('project name,{}, not found'.format(name))
+            mlUtility.raiseError('project name,{}, not found'.format(name))
             
         
     """
@@ -1010,6 +1366,7 @@ class predictProject (object):
         self.predictDataDF = self.predictFile.openTable()
 
 
+        
     """
     Purpose:
             
@@ -1030,8 +1387,16 @@ class predictProject (object):
     Example:
             
     """
-    def importPredictFromDF(self, df):
-        self.predictDataDF = df
+    def importPredictFromDF(self, df, readyForPredict=False):
+        if readyForPredict:
+            self.predictSet = df.reset_index(drop=True)
+            
+            #print (self.predictSet)
+            self.readyToRun = True
+            mlUtility.runLog( 'Prepped Predict data from DataFrame')
+        else:
+            self.predictDataDF = df
+            
 
 
     """
@@ -1043,9 +1408,58 @@ class predictProject (object):
          
     """ 
     def prepPredict(self):
-        prep = prepPredictData(self)
-        self.predictSet = prep.getPredictSet()
-        self.readyToRun = True
+        if self.readyToRun:
+            pass
+        else:
+            prep = prepPredictData(self)
+            self.predictSet = prep.getPredictSet()
+            self.readyToRun = True
+
+
+
+    """
+    Purpose:
+            
+    Call:
+            
+    Example:
+            
+    """
+ 
+    def exportPreppedFile(self, filename, columnName=None, columnData=None, columnName2=None, columnData2=None):
+        if self.predictSet is not None:
+            if columnName is not None and columnData is not None:
+                temp = self.predictSet.copy(deep=True)
+                temp[columnName] = columnData
+                #print ('\n\n\nKeyName=',columnName)
+                #print (temp[columnName])
+                #print (columnData)
+                
+                if columnName2 is not None and columnData2 is not None:
+                    temp[columnName2] = columnData2
+                mlUtility.runLog( 'Writing prepped file {}'.format(filename)) 
+                temp.to_csv(filename, index=False)
+            else:
+                self.predictSet.to_csv(filename, index=False)
+
+
+    """
+    Purpose: Get a columns from the data file
+            
+    Call: def getColumn(self, column):
+            
+    Example: prdict.getColumn('Name')
+            
+    """
+    def getColumn(self, columnName):
+        if self.predictDataDF is not None:
+            if columnName in self.predictDataDF:
+                return self.predictDataDF[columnName]
+        elif self.predictSet is not None:
+            if columnName in self.predictSet:
+                return self.predictSet[columnName]
+        return None
+
         
     """
     Purpose:
@@ -1055,7 +1469,7 @@ class predictProject (object):
     Example:
             
     """
-         
+
     def exportPredictClass(self, filename):
         with open(filename, 'wb') as f:
             pk.dump(self, f)
@@ -1070,22 +1484,63 @@ class predictProject (object):
     """
  
     def addToPredictFile(self, columnName, columnData):
-        self.predictDataDF[columnName] = columnData
+        if self.predictDataDF is not None:
+            self.predictDataDF[columnName] = columnData
+        elif self.predictSet is not None:
+            self.predictSet[columnName] = columnData
+        return None
+        
+        
+        
 
 
     def removeFromPredictFile(self, columns):
+        if self.predictDataDF is not None:
+            pred = self.predictDataDF
+        elif self.predictSet is not None:
+            pred = self.predictSet
+        if pred is None:
+            mlUtility.errorLog( 'No Predict File')
+            return
         if type(columns) is not list:
-            if columns in self.predictDataDF:
-                self.predictDataDF.drop(columns, axis=1, inplace=True)
+            if columns in pred:
+                pred.drop(columns, axis=1, inplace=True)
             else:
-                utility.runLog( 'Error: Columns {} not found to drop'.format(name))
+                mlUtility.errorLog( 'Columns {} not found to drop'.format(name))
         else:
             for name in columns:
-                if name in self.predictDataDF:
-                    self.predictDataDF.drop(name, axis=1, inplace=True)
+                if name in pred:
+                    pred.drop(name, axis=1, inplace=True)
                 else:
-                    utility.runLog( 'Error: Columns {} not found to drop'.format(name))
+                    mlUtility.errorLog( 'Columns {} not found to drop'.format(name))
         return None
+
+
+
+    def keepFromPredictFile(self, columns):
+        if self.predictDataDF is not None:
+            pred = self.predictDataDF
+        elif self.predictSet is not None:
+            pred = self.predictSet
+        if pred is None:
+            mlUtility.errorLog( 'No Predict File')
+            return
+        if type(columns) is not list:        
+            for name in pred:
+                if name == columns:
+                    pass
+                else:
+                    pred.drop(name, axis=1, inplace=True)
+                    mlUtility.runLog( 'Column {} droped'.format(name))            
+        else:
+            for name in pred:
+                if name in columns:
+                    pass
+                else:
+                    pred.drop(name, axis=1, inplace=True)
+                    mlUtility.runLog( 'Column {} droped'.format(name))
+        return None
+
 
 
     """
@@ -1099,7 +1554,15 @@ class predictProject (object):
  
     def exportPredictFile(self, filename):
         if self.predictDataDF is not None:
-            self.predictDataDF.to_csv(filename, index=False)
+            pred = self.predictDataDF
+        elif self.predictSet is not None:
+            pred = self.predictSet
+        if pred is None:
+            mlUtility.errorLog( 'No Predict File to Export')
+            return
+    
+        mlUtility.runLog( 'Writing predict file {}'.format(filename)) 
+        pred.to_csv(filename, index=False)
 
                    
     """
@@ -1110,24 +1573,33 @@ class predictProject (object):
     Example:
             
     """
-             
+            
+    @ignore_warnings(category=ConvergenceWarning)
+    @ignore_warnings(category=DataConversionWarning)         
     def runPredict(self):
-        warnings.filterwarnings(action='ignore', category=DataConversionWarning)
 
+        probaOK = hasattr(self.model, 'predict_proba') and callable(getattr(self.model, 'predict_proba'))
         try:
             if self.readyToRun:
-                if self.modelType == tm.TRAIN_CLASSIFICATION:
-                    
-                    pred = self.model.predict(self.predictSet)
-                    #p = self.model.predict_proba(self.predictSet)
-                    #pred = [x[1] for x in p]
+                if self.useProbaForPredict and probaOK:
+                    # This only works on binary for no
+                    if self.useStandardScaler:
+                        mlUtility.runLog( 'Using Standard Scaler')
+                        pred = self.model.predict_proba(StandardScaler().fit_transform(self.predictSet))
+                    else:
+                        p = self.model.predict_proba(self.predictSet)
+                        pred = [x[1] for x in p]
                 else:
-                    pred = self.model.predict(self.predictSet)
+                    if self.useStandardScaler:
+                        mlUtility.runLog( 'Using Standard Scaler')
+                        pred = self.model.predict(StandardScaler().fit_transform(self.predictSet))
+                    else:
+                        pred = self.model.predict(self.predictSet)
                 return pred
             return None
         
         except NotFittedError as e:
-            print (repr(e))
+            mlUtility.runLog (repr(e))
 
     """
     Purpose:
@@ -1166,12 +1638,12 @@ def plot_confusion_matrix(cm, classes,
     if normalize:
         cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
         #cm = cm.astype('float')/cm.sum(axis=0)
-        #print ("Normalized confusion matrix")
+        #mlUtility. traceLog(("Normalized confusion matrix")
     else:
-        #print ('Confusion matrix, without normalization')
+        #mlUtility. traceLog(('Confusion matrix, without normalization')
         pass
 
-    #print(cm)
+    #mlUtility.runLog (cm)
 
     plt.imshow(cm, interpolation='nearest', cmap=cmap)
     plt.title(title)
@@ -1190,3 +1662,22 @@ def plot_confusion_matrix(cm, classes,
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
     plt.tight_layout()
+
+
+def makeStack(classifier, list, alias=None ):
+    stacker = []
+    stack = classifier
+    if list is not None:
+        for x in list:
+            name =  mlUtility.getFirst(x) 
+            stacker.append(x)
+            stack += ':'+ x
+    if alias is not None:
+        stacker.append(stack+'#'+alias)
+    else:
+        stacker.append(stack)
+    return stacker
+
+
+    
+
